@@ -43,14 +43,57 @@ def _make_phifun(values=[1, -1], probabilities=[0.5, 0.5]):
     return phifun
 
 
+def _scalar_sum_phifun(t, scalars=[1, -1], probs=[0.5, 0.5]):
+
+    funcs = [_make_phifun(s, p)(t) for s, p in zip(scalars, probs)]
+    return np.prod(funcs, axis=0)
+
+"""
 def _scalar_sum_phifun(t, scalars=[([1, -1], [0.5, 0.5])]):
 
     funcs = [_make_phifun(*s)(t) for s in scalars]
     return np.prod(funcs, axis=0)
+"""
 
+"""
+In the zero field case the component of the field orthogonal to the spin is relevant
+Very similar to properties/linkage
 
+Class(structure, spins)
+    periodic cell
+    structure is ASE Atom
+define the positions of a certain number of spins inside cell
+Similar to ASE atoms
+    May want to define electronic spins as well as nuclear spins
+    May have 7.5 spins etc.
+
+Intensity of spin, axis of, type of (determins which gyro_ratio)
+    from these, methods like
+        get_scalar_field_dist(position_of_muon)
+        cut_off_radius
+            Build supercell and work out which spins we care and account for
+
+Look how mu-SR does it
+"""
 def _scalar_sum_distribution(scalars=[([1, -1], [0.5, 0.5])], h_steps=100):
+    """
+    Probably care about scalars in the case of a strong applied field
 
+    e.g spins all point in same dir. What is z component of field
+    Test function - write tests for it?
+    Simone has notebook used for testing of this
+
+    :param scalars: number of random vars. Asume a num of discrete values
+        probability of each value
+        {[values], [weights]}
+        TODO: define a data class for sclars to name and make it clear
+    :param h_steps: 
+    
+    Calculates ideal range - eg min case and max case for the sums
+
+    :returns om: x-axis
+    :returns spec: prob
+    """
     maxs = np.sum([np.amax(s[0]) for s in scalars])
     mins = np.sum([np.amin(s[0]) for s in scalars])
 
@@ -106,7 +149,13 @@ def _vector_len2_phi(scalars, axes, t):
 
 def _vector_len2_distribution(scalars=[([1, -1], [0.5, 0.5])],
                               axes=[[0, 0, 1]], h_steps=100):
+    """
+    Distribution on the square modulus of the vecotrs?
+    Vector sum 
+    result will have a certain len
+    P(square_length)
 
+    """
     # Bound: treat them as if all axes were aligned
     maxn = np.sum([np.amax(np.abs(s[0])) for s in scalars])
     width = maxn**2

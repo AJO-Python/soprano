@@ -433,7 +433,7 @@ def safe_communicate(subproc, stdin=''):
 
     return stdout, stderr
 
-
+#TODO: Is this missing a function def?
 # Inspecting arguments of a function, Python 2 and 3 way
 if hasattr(inspect, 'signature'):
     def inspect_args(f):
