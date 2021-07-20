@@ -15,11 +15,20 @@ from typing import List, Dict
 import numpy as np
 import scipy.constants as cnst
 from scipy.integrate import quad, romberg
-from soprano.utils import minimum_supcell, supcell_gridgen
+import ase.io
+from ase import Atom, Atoms
+from ase.visualize import view
+
+from soprano.utils import (
+                        minimum_supcell,
+                        supcell_gridgen,
+                        Clonable,
+                        )
 from soprano.calculate.powder import ZCW, SHREWD, TriAvg
 from soprano.nmr.utils import _dip_constant
-from soprano.data.nmr import _get_isotope_data
+from soprano.data.nmr import nmr_gamma, nmr_spin
 from soprano.constants import m_gamma
+from soprano.properties.nmr import DipolarTensor
 
 # Dipolar line functions
 
@@ -84,74 +93,121 @@ def _distr_spec(x, D, eta, nsteps=3000):
     return np.sum(ker, axis=0)*dx0
 
 
-class DipolarField(object):
-    Vector = List[float, float, float]
-    def __init__(self, atoms, mu_pos: List[Vector], isotopes: Dict=None, isotope_list: List=None, cutoff: float=10, overlap_eps: float=1e-3):
+class DipolarField(Clonable):
+
+    def __init__(self, atoms, mu_pos, isotopes: List=None, cutoff: float=10, overlap_eps: float=1e-3):
         """
         :param atoms: Atoms contributing to field
         :type atoms: AtomCollection
-        :param mu_pos: positions to calculate field at?
-        :type mu_pos: list[float, float, float]
-        :param isotopes:
-        :param isoptope_list:
+        :param mu_pos: Muon positions to calculate dipolar field at
+        :type mu_pos: list[list[float, float, float]]
+        :param isoptopes: Ordered list of isotopes corresponding to the atoms collection
+        :type isotopes: list(Union(str|int))
         :param cutoff: Max radius for the supercell to be calculated
         :param overlap_eps: Lower limit for calculating field to. Below this field=np.inf
         """
         # Get positions, cell, and species, only things we care about
-        self.cell = np.array(atoms.get_cell())
-        pos = atoms.get_positions()
-        el = np.array(atoms.get_chemical_symbols())
-
+        self.atoms = atoms
         self.mu_pos = np.array(mu_pos)
+        self.isotopes = isotopes
+        self.cutoff = cutoff
+        self.overlap_eps = overlap_eps
 
-        # Is it periodic?
-        if np.any(atoms.get_pbc()):
-            # cutoff=max_r
-            # self.cell=latt_cart=lattice cartesian coords
-            scell = minimum_supcell(cutoff, self.cell)
-        else:
-            # set supercell to unitcell
-            scell = [1,1,1]
-            
-        grid_f, grid = supcell_gridgen(self.cell, scell)
+        self.cell = np.array(atoms.get_cell())
+        self.elements = np.array(atoms.get_chemical_symbols())
+        self.nmr_gammas = nmr_gamma(self.elements, self.isotopes)
+        self.nmr_spin = nmr_spin(self.elements, self.isotopes)
 
-        self.grid_f = grid_f    # supercell grid in fractional coords
+        self.grid_frac, self.grid_cart = supcell_gridgen(self.cell, self.scell)
 
-        # Gets grid coords inside the max sphere used for supercell calculations
-        r = (pos[:, None, :] + grid[None, :, :] -
-             self.mu_pos[None, None, :]).reshape((-1, 3))
-        rnorm = np.linalg.norm(r, axis=1)
-        sphere = np.where(rnorm <= cutoff)[0]
-        sphere = sphere[np.argsort(rnorm[sphere])[::-1]]  # Sort by length
-        r = r[sphere]
-        rnorm = rnorm[sphere]
-
-        self._r = r
-        self._rn = rnorm
-        self._rn = np.where(self._rn > overlap_eps, self._rn, np.inf)
-        self._ri = sphere
+        # Gets grid coords inside the max sphere used for supercell calculations (centered on atom by muon z positions?)
+        self._set_scell_coords()
         # _dT = conversion to Tesla?
         # 3r_dot
-        self._dT = (3*r[:, :, None]*r[:, None, :] /
-                    self._rn[:, None, None]**2-np.eye(3)[None, :, :])/2
+        # DipolarTensor equation - see nmr/dipolar/dipolarTensor for better function
+        self._dT = (
+            (3*self._r_coords[:, :, None] * self._r_coords[:, None, :] / (self._r_norm[:, None, None]**2)) - np.eye(3)[None, :, :]) / 2
 
-        self._an = len(pos)
-        self._gn = self.grid_f.shape[0]
-        self._a_i = self._ri//self._gn
-        self._ijk = self.grid_f[self._ri % self._gn]
-
-        # Get gammas
-        isotopes = {} if isotopes is None else isotopes
-        self.gammas = _get_isotope_data(el, 'gamma', isotopes, isotope_list)
-        self.gammas = self.gammas[self._a_i]
-        Dn = _dip_constant(self._rn*1e-10, m_gamma, self.gammas)
-        De = _dip_constant(self._rn*1e-10, m_gamma,
+        self._num_atoms = len(self.atom_pos)
+        self._num_grid_points = self.grid_frac.shape[0]
+        self._a_i = self._r_indexes // self._num_grid_points  # This is always going to be an array of zeros?
+        self._r_ijk = self.grid_frac[self._r_indexes % self._num_grid_points]  # This is just
+        # print("num atoms: ", self._num_atoms)
+        # print("num gridpoints: ", self._num_grid_points)
+        # print("nmr_gammas: ", self.nmr_gammas)
+        Dn = _dip_constant(self._r_norm * 1e-10, m_gamma, self.nmr_gammas)
+        De = _dip_constant(self._r_norm * 1e-10, m_gamma,
                            cnst.physical_constants['electron gyromag. ratio'][0])
-
         self._D = {'n': Dn, 'e': De}
-
         # Start with all zeros
-        self.spins = rnorm*0
+        self.spins = self._r_norm * 0
+
+    def get_dipolar_tensors(self):
+        return DipolarTensor.get(self.atoms, self_coupling=False)
+
+    def add_supercell_atoms(self, n=1):
+        """Fills in atoms in each unit cell over the whole supercell
+        TODO: Improve algo. 3 nested lists will get expensive for complicated unit cells
+        TODO: If n < current size, remove extra unit cells
+        :param n: Number of units cells along axis in the supercell (same for all axis)
+        :type n: int
+        :return: setter for self.atoms - extends existing atoms property
+        """
+        extra_atom = self.atoms.copy()
+        for i in range(-n, n+1):
+            for j in range(-n, n+1):
+                for k in range(-n, n+1):
+                    extra_atom.set_scaled_positions([i, j, k])
+                    self.atoms.extend(extra_atom)
+        # Remove any duplicates - only one atom per site!
+        pos_list = [list(pos) for pos in self.atom_pos]  # Convert to lists to use `in` operator
+        dups = []
+        for i, pos in enumerate(pos_list):
+            if pos in pos_list[i+1:]:
+                dups.append(i)
+        del self.atoms[dups]
+        print(f"Number of atoms in add_supercell_atoms (n={n}): {len(self.atom_pos)}")
+        # view(self.atoms)
+
+    @property
+    def atom_pos(self):
+        return self.atoms.get_positions()
+
+    @property
+    def scell(self):
+        if not hasattr(self, "_scell"):
+            self._set_scell()
+        return self._scell
+
+    def _set_scell(self):
+        """Calculates the supercell or sets to [1, 1, 1] for non-PBC Atoms
+        """
+        # Is it periodic?
+        if np.any(self.atoms.get_pbc()):
+            # cutoff=max_r
+            # self.cell=latt_cart=lattice cartesian coords
+            self._scell = minimum_supcell(self.cutoff, self.cell)
+        else:
+            # set supercell to unitcell
+            self._scell = [1, 1, 1]
+
+    def _set_scell_coords(self):
+        """
+        Sets supercell properties
+        :property _r_coords: supercell coordinates
+        :type _r_coords:
+        :setter:
+        """
+        scell_coords = (self.atom_pos[:, None, :] + self.grid_cart[None, :, :] - self.mu_pos[None, None, :]).reshape((-1, 3))
+        scell_rnorm = np.linalg.norm(scell_coords, axis=1)
+        sphere = np.where(scell_rnorm <= self.cutoff)[0]
+        sphere = sphere[np.argsort(scell_rnorm[sphere])[::-1]]  # Sort by length
+        # print("scell rnorms: ", scell_rnorm)
+        # print("scell coords: ", scell_coords)
+        self._r_coords = scell_coords[sphere]
+        self._r_norm = scell_rnorm[sphere]
+        self._r_norm = np.where(self._r_norm > self.overlap_eps, self._r_norm, np.inf)
+        self._r_indexes = sphere  # List[int]
 
     def set_moments(self, moments, moment_type='e'):
         """
@@ -160,7 +216,7 @@ class DipolarField(object):
         :returns: setter
         """
         spins = np.array(moments)
-        if spins.shape != (self._an,):
+        if spins.shape != (self._num_atoms,):
             raise ValueError('Invalid moments array shape')
 
         try:

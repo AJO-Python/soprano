@@ -33,6 +33,7 @@ import sys
 from contextlib import contextmanager
 import inspect
 import warnings
+from copy import deepcopy
 import numpy as np
 from ase import Atoms
 from scipy.special import factorial
@@ -989,3 +990,16 @@ def graph_specsort(L):
     fied *= -1 if np.sum(fied > 0) < n/2.0 else 1
 
     return np.argsort(fied)
+
+
+class Clonable(object):
+    """A helper class; any object inheriting
+    from this will have a .clone method that copies it easily."""
+
+    def clone(self):
+
+        MyClass = self.__class__
+        copy = MyClass.__new__(MyClass)
+        copy.__dict__ = deepcopy(self.__dict__)
+
+        return copy
