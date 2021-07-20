@@ -29,7 +29,7 @@ from soprano.utils import minimum_periodic, minimum_supcell, supcell_gridgen
 from soprano.properties import AtomsProperty
 from soprano.selection import AtomSelection
 from soprano.nmr.utils import _dip_constant, _dip_tensor
-from soprano.data.nmr import _get_isotope_data
+from soprano.data.nmr import _get_isotope_data, nmr_gamma
 
 
 class DipolarCoupling(AtomsProperty):
@@ -118,21 +118,17 @@ class DipolarCoupling(AtomsProperty):
 
         # Find gammas
         elems = s.get_chemical_symbols()
-
-        gammas = _get_isotope_data(elems, 'gamma', isotopes, isotope_list)
-
+        gammas = nmr_gamma(elems, isotope_list)
         # Viable pairs
         pairs = [(i, j) for i in sel_i.indices
                  for j in sel_j.indices]
         if not self_coupling:
             pairs = [p for p in pairs if p[0] != p[1]]
-
         pairs = np.array(pairs).T
         # Need to sort them and remove any duplicates, also take i < j as
         # convention
         pairs = np.array(list(zip(*set([tuple(x)
                                         for x in np.sort(pairs, axis=0).T]))))
-
         pos = s.get_positions()
 
         # Split this in blocks to make sure we don't clog the memory
@@ -146,6 +142,8 @@ class DipolarCoupling(AtomsProperty):
             block = pairs.T[b_i:b_i+block_size]
             r_ij = pos[block[:, 1]] - pos[block[:, 0]]
             # Reduce to NN
+            #                                 \/ Supercell or unitcell?  \/ Should this take $self_coupling for exclude_self? (inverse)
+            # TODO: Find out if I need this to be NN or it should be for all interactions?
             r_ij, _ = minimum_periodic(r_ij, s.get_cell(), exclude_self=True)
             # Distance
             R_ij = np.linalg.norm(r_ij, axis=1)
@@ -374,7 +372,7 @@ class DipolarRSS(AtomsProperty):
         pos = s.get_positions()
         elems = np.array(s.get_chemical_symbols())
 
-        gammas = _get_isotope_data(elems, 'gamma', isotopes, isotope_list)
+        gammas = nmr_gamma(elems, isotope_list)
 
         dip_rss = []
 
