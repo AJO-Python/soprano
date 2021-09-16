@@ -17,6 +17,7 @@ from soprano.selection import AtomSelection
 from soprano.calculate.dipolar import DipolarField
 import ase
 
+
 class TestDipolarField(unittest.TestCase):
     si_atoms = ase.io.read("test_data/Si.json", index=":", format="json")[0]
     muon_pos = [0.1, 0.1, 0.1]
@@ -67,26 +68,6 @@ class TestDipolarField(unittest.TestCase):
         # Gets very expensive for large num_cells
         self.assertTrue(keys == pairs)
 
-    def test_plot(self):
-        pass
-        # import matplotlib.pyplot as plt
-        # self.field.add_supercell_atoms(n=1)
-        # dip_ten = self.field.get_dipolar_tensors()
-        #
-        # from ase.visualize import view
-        # hyd1 = ase.Atoms(["H"], scaled_positions=[[0, 0, 0]], cell=[1, 1, 1])
-        # hyd1 *= 2
-        # del hyd1[[1, 3, 4, 5, 6, 7]]
-        # hyd1.center()
-        # print(hyd1)
-        # view(hyd1)
-        # # full_tensor = [np.sum(x) ]
-        # # for i in dip_ten.values():
-        # #     print(i)
-        # #     break
-        # # print(np.sum(dip_ten.values(), axis=0))
-        # # print(dip_ten[(0, 1)])
-        # # print(dip_ten[(0, 2)])
 
 
 

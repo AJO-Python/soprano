@@ -45,10 +45,10 @@ def _distr_D(x, D):
 
 def _distr_eta(x, x0, D, eta):
     """
-    :param x: 
-    :param x0: 
+    :param x:
+    :param x0:
     :param D:
-    :param eta: 
+    :param eta:
     """
     den = eta**2*(2-2*x0/D)**2-9*(x-x0)**2
     den = np.where(den > 0, den, np.inf)
@@ -193,17 +193,13 @@ class DipolarField(Clonable):
 
     def _set_scell_coords(self):
         """
-        Sets supercell properties
+        Sets supercell properties and values for coordinates inside supercell
         :property _r_coords: supercell coordinates
-        :type _r_coords:
-        :setter:
         """
         scell_coords = (self.atom_pos[:, None, :] + self.grid_cart[None, :, :] - self.mu_pos[None, None, :]).reshape((-1, 3))
         scell_rnorm = np.linalg.norm(scell_coords, axis=1)
         sphere = np.where(scell_rnorm <= self.cutoff)[0]
         sphere = sphere[np.argsort(scell_rnorm[sphere])[::-1]]  # Sort by length
-        # print("scell rnorms: ", scell_rnorm)
-        # print("scell coords: ", scell_coords)
         self._r_coords = scell_coords[sphere]
         self._r_norm = scell_rnorm[sphere]
         self._r_norm = np.where(self._r_norm > self.overlap_eps, self._r_norm, np.inf)
@@ -226,13 +222,13 @@ class DipolarField(Clonable):
 
     def dipten(self):
         """
-        dipolar tensor? 
+        dipolar tensor?
         """
         return np.sum(self.spins[:, None, None]*self._dT, axis=0)
 
     def frequency(self, axis=[0, 0, 1]):
         """
-        
+
         :returns: larmor frequency? w=-yB?
         """
         D = self.dipten()
@@ -327,7 +323,7 @@ class DipolarField(Clonable):
         return om, spec
 
     def random_spec_zf(self, width=None, h_steps=100):
-        
+
         if width is None:
             width = np.sum(np.abs(self.spins))
 
